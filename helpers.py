@@ -1,5 +1,6 @@
 import os
-from PIL import Image
+import numpy as np
+import imageio
 
 def create_manifest_train(train_path='Training_data/'):
     """
@@ -31,7 +32,6 @@ def create_manifest_train(train_path='Training_data/'):
 
 
 def create_manifest_test(test_path='Test_data/'):
-    lines = []
     classes = ['Normal', 'In situ', 'Benign', 'Invasive']
     with open(test_path + 'labels_orig.txt', 'r') as f:
         lines = f.readlines()
@@ -40,7 +40,17 @@ def create_manifest_test(test_path='Test_data/'):
             stripped = line.strip().rsplit("\t")
             f.write(test_path + stripped[0] + '.tif %d\n' % (classes.index(stripped[1])))
 
+def normalize_img(img):
+    mean = np.mean(img)
+    img = np.subtract(img, mean)
+    var = np.var(img)
+    img /= var
+    return img
+
 
 if __name__ == "__main__":
-    create_manifest_train()
-    create_manifest_test()
+    print("This is a collection of helper functions you can call if you import this file.")
+    img = imageio.imread('Training_data/Invasive/t1.tif')
+    img = np.array(img, np.float32)
+    normalize_img(img)
+

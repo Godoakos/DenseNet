@@ -2,8 +2,11 @@
 
 import tensorflow as tf
 from tensorflow.contrib.layers import batch_norm
+import imageio
 import scipy.misc as sp
 from random import shuffle
+
+from helpers import *
 
 
 class Model():
@@ -12,7 +15,7 @@ class Model():
     """
     def __init__(self, batch_size=10,
                  train_path='Training_data/', test_path='Test_data/',
-                 num_classes=4, input_size=[1536, 2048, 3]):
+                 input_size=[768, 1024, 3]):
         """
         Sets up initial parameters for the model to use.
         :param batch_size: int, batch size to use during training/testing
@@ -23,7 +26,6 @@ class Model():
         self.batch_size = batch_size
         self.train_path = train_path
         self.test_path = test_path
-        self.num_classes = num_classes
         self.input_size = input_size
 
         self.images = tf.placeholder(dtype=tf.float32,
@@ -59,7 +61,9 @@ class Model():
         img_data = []
         lbl_data = []
         for line in lines:
-            img_data.append(sp.imread(path + line[0][:-2]))
+            img = imageio.imread(path + line[0][:-2])
+            img = sp.imresize(img, 0.5)
+            img_data.append(normalize_img(img))
             lbl_data.append([0., 0., 0., 0.])
             lbl_data[-1][int(line[0][-1])] = 1.
             if len(lbl_data) == self.batch_size:
@@ -169,19 +173,20 @@ class DenseNet(Model):
             title = {Densely Connected Convolutional Networks},
             journal = {arXiv preprint arXiv:1608.06993},
             year = {2016}}
-    TODO: Add SELU, Dropout, L2 Normalization, tweak params, etc
+    TODO: Add SELU, L2 Normalization, tweak params, etc
     """
     def __init__(self, batch_size=5,
                  train_path='Training_data/', test_path='Test_data/',
-                 input_size=[1536, 2048, 3],
-                 num_blocks=3,
-                 convs_per_block=3,
-                 growth_factor=12,
-                 compression=1.):
+                 input_size=[768, 1024, 3],
+                 num_blocks=4,
+                 convs_per_block=6,
+                 growth_factor=32,
+                 compression=0.5):
         self.growth_factor = growth_factor
         self.compression = compression
         self.blocks = num_blocks
         self.convs = convs_per_block
+
         super(DenseNet, self).__init__(batch_size, train_path, test_path, input_size)
 
     def composite(self, input, kernel_size=3):
@@ -197,7 +202,9 @@ class DenseNet(Model):
         conv = tf.nn.conv2d(relu, kern, strides=[1, 1, 1, 1], padding='SAME')
         # Important to preserve feature map size!!!
 
-        return conv
+        drop = tf.nn.dropout(conv, 0.5)
+
+        return drop
 
     def transition(self, input):
         """
@@ -207,7 +214,8 @@ class DenseNet(Model):
         """
         normie = batch_norm(input, scale=True)
 
-        kernel = tf.truncated_normal([1, 1, int(normie.get_shape()[-1]), int(input.get_shape()[-1] * self.compression)])
+        kernel = tf.truncated_normal([1, 1, int(normie.get_shape()[-1]),
+                                      int(int(input.get_shape()[-1]) * self.compression)])
         conv = tf.nn.conv2d(normie, kernel, strides=[1, 1, 1, 1], padding='SAME')
         # A 1x1 conv shouldn't reduce featmap size, but still...
 
@@ -221,7 +229,7 @@ class DenseNet(Model):
         :param input: input to the bottleneck layer
         :return: featuremap with a size reduced to (4*growth factor)
         """
-        kern = tf.truncated_normal([1, 1, int(input.shape[-1]), 4*self.growth_factor])
+        kern = tf.truncated_normal([1, 1, int(input.shape[-1]), min(4*self.growth_factor, int(input.shape[-1]))])
         bn = tf.nn.conv2d(input, kern,
                           strides=[1, 1, 1, 1],
                           padding='SAME')
@@ -257,7 +265,7 @@ class DenseNet(Model):
                                  strides=[1, featmap_size_x, featmap_size_y, 1],
                                  padding='VALID')
         output = tf.reshape(avgpool, [self.batch_size, avgpool.get_shape()[-1]])
-        output = tf.layers.dense(output, self.num_classes, activation=tf.nn.softmax)
+        output = tf.layers.dense(output, units=4, activation=tf.nn.softmax)
 
         return output
 
@@ -273,18 +281,17 @@ class DenseNet(Model):
                                               strides=(2, 2))
 
         for b in range(self.blocks-1):
-            print("KAKI %d" % b)
             network = self.dense_block(network, b)
             network = self.transition(network)
 
-        print('KAKI %d' % (self.blocks-1))
         network = self.dense_block(network, self.blocks-1)
         network = self.output(network)
 
         return network
 
     def train(self, num_epochs=5):
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.labels, logits=self.model))
+        l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name]) * 0.001
+        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels, logits=self.model)) + l2
         optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
         train_op = optimizer.minimize(loss)
 
