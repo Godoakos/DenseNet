@@ -238,6 +238,7 @@ class DenseNet(Model):
         """
         kern = tf.Variable(tf.random_normal([1, 1, int(input.shape[-1]), 4*self.growth_factor],
                                             stddev=np.sqrt(1)))
+        
         bn = tf.nn.conv2d(input, kern,
                           strides=[1, 1, 1, 1],
                           padding='SAME')
@@ -255,11 +256,10 @@ class DenseNet(Model):
         output = self.composite(output)
         return tf.concat(values=(input, output), axis=3)
 
-    def dense_block(self, input, id):
-        with tf.variable_scope("block_%d" % id):
-            output = self.internal_layer(input)
-            for c in range(self.convs - 1):
-                output = self.internal_layer(output)
+    def dense_block(self, input, id):  # Is this even good???
+        output = self.internal_layer(input)
+        for c in range(self.convs - 1):
+            output = self.internal_layer(output)
         return output
 
     def output(self, input):
