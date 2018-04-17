@@ -1,6 +1,6 @@
 import os
 import numpy as np
-import imageio
+from PIL import Image
 
 def create_manifest_train(train_path='Training_data/'):
     """
@@ -47,8 +47,13 @@ def normalize_img(img):
     img /= var
     return img
 
+def augment(manifest_path):
+    with open(manifest_path, 'r') as f:
+        lines = [line.strip().split('\t') for line in f.readlines()]
+        print(lines)
+
 
 if __name__ == "__main__":
     print("This is a collection of helper functions you can call if you import this file.")
     create_manifest_test()
-
+    create_manifest_train()

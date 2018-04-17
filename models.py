@@ -199,17 +199,16 @@ class DenseNet(Model):
         relu = tf.nn.relu(normie)
 
         # kern = tf.truncated_normal([kernel_size, kernel_size, int(relu.shape[-1]), self.growth_factor])
+
         kern = tf.Variable(tf.random_normal(
             [kernel_size, kernel_size, int(relu.shape[-1]), self.growth_factor],
-            stddev=np.sqrt(1/kernel_size*kernel_size)),
-            trainable=True)
+            stddev=np.sqrt(1/kernel_size*kernel_size)))
         conv = tf.nn.conv2d(relu, kern, strides=[1, 1, 1, 1], padding='SAME')
-        selu = tf.nn.selu(conv)
         # Important to preserve feature map size!!!
 
-        # drop = tf.nn.dropout(conv, 0.5)
+        drop = tf.nn.dropout(conv, 0.6)
 
-        return selu
+        return drop
 
     def transition(self, input):
         """
@@ -221,13 +220,11 @@ class DenseNet(Model):
 
         kernel = tf.Variable(
             tf.random_normal([1, 1, int(normie.get_shape()[-1]), int(int(input.get_shape()[-1]) * self.compression)],
-                             stddev=np.sqrt(1)),
-            trainable=True)
+                             stddev=np.sqrt(1)))
         conv = tf.nn.conv2d(normie, kernel, strides=[1, 1, 1, 1], padding='SAME')
-        selu = tf.nn.selu(conv)
         # A 1x1 conv shouldn't reduce featmap size, but still...
 
-        pool = tf.nn.avg_pool(selu, [1, 2, 2, 1], [1, 2, 2, 1], padding='VALID')
+        pool = tf.nn.avg_pool(conv, [1, 2, 2, 1], [1, 2, 2, 1], padding='VALID')
         return pool
 
     def bottleneck(self, input):
@@ -243,9 +240,8 @@ class DenseNet(Model):
         bn = tf.nn.conv2d(input, kern,
                           strides=[1, 1, 1, 1],
                           padding='SAME')
-        selu = tf.nn.selu(bn)
 
-        return selu
+        return bn
 
     def internal_layer(self, input):
         """
