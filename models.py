@@ -15,7 +15,7 @@ class Model():
     """
     def __init__(self, batch_size=10,
                  train_path='Training_data/', test_path='Test_data/',
-                 input_size=[768, 1024, 3]):
+                 input_size=[224, 224, 3]):
         """
         Sets up initial parameters for the model to use.
         :param batch_size: int, batch size to use during training/testing
@@ -62,7 +62,7 @@ class Model():
         lbl_data = []
         for line in lines:
             img = imageio.imread(path + line[0][:-2])
-            img = sp.imresize(img, 0.5)
+            img = sp.imresize(img, self.input_size)
             img_data.append(normalize_img(img))
             lbl_data.append([0., 0., 0., 0.])
             lbl_data[-1][int(line[0][-1])] = 1.
@@ -177,8 +177,8 @@ class DenseNet(Model):
     """
     def __init__(self, batch_size=5,
                  train_path='Training_data/', test_path='Test_data/',
-                 input_size=[768, 1024, 3],
-                 num_blocks=4,
+                 input_size=[224, 224, 3],
+                 num_blocks=3,
                  convs_per_block=6,
                  growth_factor=32,
                  compression=0.5):
@@ -198,13 +198,17 @@ class DenseNet(Model):
         normie = batch_norm(input, scale=True)
         relu = tf.nn.relu(normie)
 
-        kern = tf.truncated_normal([kernel_size, kernel_size, int(relu.shape[-1]), self.growth_factor])
+        # kern = tf.truncated_normal([kernel_size, kernel_size, int(relu.shape[-1]), self.growth_factor])
+        kern = tf.Variable(tf.random_normal(
+            [kernel_size, kernel_size, int(relu.shape[-1]), self.growth_factor],
+            stddev=np.sqrt(1/kernel_size*kernel_size)))
         conv = tf.nn.conv2d(relu, kern, strides=[1, 1, 1, 1], padding='SAME')
+        selu = tf.nn.selu(conv)
         # Important to preserve feature map size!!!
 
-        drop = tf.nn.dropout(conv, 0.5)
+        # drop = tf.nn.dropout(conv, 0.5)
 
-        return drop
+        return selu
 
     def transition(self, input):
         """
@@ -214,12 +218,14 @@ class DenseNet(Model):
         """
         normie = batch_norm(input, scale=True)
 
-        kernel = tf.truncated_normal([1, 1, int(normie.get_shape()[-1]),
-                                      int(int(input.get_shape()[-1]) * self.compression)])
+        kernel = tf.Variable(
+            tf.random_normal([1, 1, int(normie.get_shape()[-1]), int(int(input.get_shape()[-1]) * self.compression)],
+                             stddev=np.sqrt(1)))
         conv = tf.nn.conv2d(normie, kernel, strides=[1, 1, 1, 1], padding='SAME')
+        selu = tf.nn.selu(conv)
         # A 1x1 conv shouldn't reduce featmap size, but still...
 
-        pool = tf.nn.avg_pool(conv, [1, 2, 2, 1], [1, 2, 2, 1], padding='VALID')
+        pool = tf.nn.avg_pool(selu, [1, 2, 2, 1], [1, 2, 2, 1], padding='VALID')
         return pool
 
     def bottleneck(self, input):
@@ -229,12 +235,15 @@ class DenseNet(Model):
         :param input: input to the bottleneck layer
         :return: featuremap with a size reduced to (4*growth factor)
         """
-        kern = tf.truncated_normal([1, 1, int(input.shape[-1]), min(4*self.growth_factor, int(input.shape[-1]))])
+        # kern = tf.truncated_normal([1, 1, int(input.shape[-1]), min(4*self.growth_factor, int(input.shape[-1]))])
+        kern = tf.Variable(tf.random_normal([1, 1, int(input.shape[-1]), min(4*self.growth_factor, int(input.shape[-1]))],
+                                            stddev=np.sqrt(1)))
         bn = tf.nn.conv2d(input, kern,
                           strides=[1, 1, 1, 1],
                           padding='SAME')
+        selu = tf.nn.selu(bn)
 
-        return bn
+        return selu
 
     def internal_layer(self, input):
         """
@@ -242,8 +251,8 @@ class DenseNet(Model):
         :param input: the input to append output to
         :return: the extended feature map
         """
-        output = self.bottleneck(input)
-        output = self.composite(output)
+        # output = self.bottleneck(input)
+        output = self.composite(input)
         return tf.concat(values=(input, output), axis=3)
 
     def dense_block(self, input, id):
@@ -290,8 +299,8 @@ class DenseNet(Model):
         return network
 
     def train(self, num_epochs=5):
-        l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name]) * 0.001
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels, logits=self.model)) + l2
+        # l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name]) * 0.001
+        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels, logits=self.model))  # + l2
         optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
         train_op = optimizer.minimize(loss)
 

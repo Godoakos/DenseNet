@@ -38,7 +38,7 @@ def create_manifest_test(test_path='Test_data/'):
     with open(test_path + 'labels.txt', 'w') as f:
         for line in lines:
             stripped = line.strip().rsplit("\t")
-            f.write(test_path + stripped[0] + '.tif %d\n' % (classes.index(stripped[1])))
+            f.write(stripped[0] + '.tif %d\n' % (classes.index(stripped[1])))
 
 def normalize_img(img):
     mean = np.mean(img)
@@ -50,7 +50,5 @@ def normalize_img(img):
 
 if __name__ == "__main__":
     print("This is a collection of helper functions you can call if you import this file.")
-    img = imageio.imread('Training_data/Invasive/t1.tif')
-    img = np.array(img, np.float32)
-    normalize_img(img)
+    create_manifest_test()
 
