@@ -54,6 +54,8 @@ class Model():
         """
         path = self.train_path if training else self.test_path
         ext = '_ext' if os.path.exists(path+"labels_ext.txt") else ''  # checks if extended data set labels exist
+        if len(ext):
+            print('Using extended dataset...')
         with open(path+"labels%s.txt" % ext, 'r') as f:
             lines = [line.strip().split() for line in f.readlines()]
             if random:
@@ -180,13 +182,13 @@ class DenseNet(Model):
                  train_path='Training_data/', test_path='Test_data/',
                  input_size=[224, 224, 3],
                  num_blocks=3,
-                 convs_per_block=6,
-                 growth_factor=32,
-                 compression=0.5):
-        self.growth_factor = growth_factor
-        self.compression = compression
+                 L=6,
+                 k=32,
+                 theta=0.5):
+        self.growth_factor = k
+        self.compression = theta
         self.blocks = num_blocks
-        self.convs = convs_per_block
+        self.convs = L
 
         super(DenseNet, self).__init__(batch_size, train_path, test_path, input_size)
 
@@ -199,15 +201,13 @@ class DenseNet(Model):
         normie = batch_norm(input, scale=True)
         relu = tf.nn.relu(normie)
 
-        # kern = tf.truncated_normal([kernel_size, kernel_size, int(relu.shape[-1]), self.growth_factor])
-
         kern = tf.Variable(tf.random_normal(
             [kernel_size, kernel_size, int(relu.shape[-1]), self.growth_factor],
             stddev=np.sqrt(1/kernel_size*kernel_size)))
         conv = tf.nn.conv2d(relu, kern, strides=[1, 1, 1, 1], padding='SAME')
         # Important to preserve feature map size!!!
 
-        drop = tf.nn.dropout(conv, 0.6)
+        drop = tf.nn.dropout(conv, 0.8)
 
         return drop
 
@@ -223,9 +223,10 @@ class DenseNet(Model):
             tf.random_normal([1, 1, int(normie.get_shape()[-1]), int(int(input.get_shape()[-1]) * self.compression)],
                              stddev=np.sqrt(1)))
         conv = tf.nn.conv2d(normie, kernel, strides=[1, 1, 1, 1], padding='SAME')
+        drop = tf.nn.dropout(conv, 0.8)
         # A 1x1 conv shouldn't reduce featmap size, but still...
 
-        pool = tf.nn.avg_pool(conv, [1, 2, 2, 1], [1, 2, 2, 1], padding='VALID')
+        pool = tf.nn.avg_pool(drop, [1, 2, 2, 1], [1, 2, 2, 1], padding='VALID')
         return pool
 
     def bottleneck(self, input):
@@ -235,14 +236,14 @@ class DenseNet(Model):
         :param input: input to the bottleneck layer
         :return: featuremap with a size reduced to (4*growth factor)
         """
-        # kern = tf.truncated_normal([1, 1, int(input.shape[-1]), min(4*self.growth_factor, int(input.shape[-1]))])
-        kern = tf.Variable(tf.random_normal([1, 1, int(input.shape[-1]), min(4*self.growth_factor, int(input.shape[-1]))],
+        kern = tf.Variable(tf.random_normal([1, 1, int(input.shape[-1]), 4*self.growth_factor],
                                             stddev=np.sqrt(1)))
         bn = tf.nn.conv2d(input, kern,
                           strides=[1, 1, 1, 1],
                           padding='SAME')
+        drop = tf.nn.dropout(bn, 0.8)
 
-        return bn
+        return drop
 
     def internal_layer(self, input):
         """
@@ -273,18 +274,18 @@ class DenseNet(Model):
                                  strides=[1, featmap_size_x, featmap_size_y, 1],
                                  padding='VALID')
         output = tf.reshape(avgpool, [self.batch_size, avgpool.get_shape()[-1]])
-        output = tf.layers.dense(output, units=4, activation=tf.nn.softmax)
+        output = tf.layers.dense(output, units=4)
 
-        return output
+        return tf.nn.softmax(output)
 
     def build_model(self):
         """
         Connects the building blocks defined above into a nice DenseNet :)
         :return: the class probabilities of the network
         """
+        print('Setting up network...')
         network = tf.layers.conv2d(self.images, filters=2*self.growth_factor,
                                    kernel_size=7, strides=(2, 2))
-
         network = tf.layers.average_pooling2d(network, pool_size=(3, 3),
                                               strides=(2, 2))
 
@@ -298,9 +299,10 @@ class DenseNet(Model):
         return network
 
     def train(self, num_epochs=5):
-        # l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name]) * 0.001
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels, logits=self.model))  # + l2
-        optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
+        decay = 0
+        l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name]) * decay
+        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels, logits=self.model)) + l2
+        optimizer = tf.train.MomentumOptimizer(learning_rate=0.1, momentum=0.9, use_nesterov=True)
         train_op = optimizer.minimize(loss)
 
         with tf.Session() as sess:
