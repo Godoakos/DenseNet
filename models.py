@@ -192,7 +192,7 @@ class DenseNet(Model):
 
         super(DenseNet, self).__init__(batch_size, train_path, test_path, input_size)
 
-    def composite(self, input, kernel_size=3):
+    def composite(self, input, _id, kernel_size=3):
         """
         Realizes composite function H_l (batch norm, relu, 3x3 conv)
         :param input: the input of the composite function
@@ -201,9 +201,9 @@ class DenseNet(Model):
         normie = batch_norm(input, scale=True)
         relu = tf.nn.relu(normie)
 
-        kern = tf.Variable(tf.random_normal(
-            [kernel_size, kernel_size, int(relu.shape[-1]), self.growth_factor],
-            stddev=np.sqrt(1/kernel_size*kernel_size)))
+        kern = tf.get_variable('composite_%d' % _id,
+                               shape=[kernel_size, kernel_size, int(relu.shape[-1]), self.growth_factor],
+                               initializer=tf.contrib.layers.xavier_initializer())
         conv = tf.nn.conv2d(relu, kern, strides=[1, 1, 1, 1], padding='SAME')
         # Important to preserve feature map size!!!
 
@@ -211,7 +211,7 @@ class DenseNet(Model):
 
         return drop
 
-    def transition(self, input):
+    def transition(self, input, _id):
         """
         Realizes transition layer between dense blocks (batch norm, 1x1 conv, 2x2 avg pool)
         :param input: output of a dense block
@@ -219,26 +219,26 @@ class DenseNet(Model):
         """
         normie = batch_norm(input, scale=True)
 
-        kernel = tf.Variable(
-            tf.random_normal([1, 1, int(normie.get_shape()[-1]), int(int(input.get_shape()[-1]) * self.compression)],
-                             stddev=np.sqrt(1)))
-        conv = tf.nn.conv2d(normie, kernel, strides=[1, 1, 1, 1], padding='SAME')
+        kern = tf.get_variable('transition_%d' % _id,
+                               shape=[1, 1, int(normie.get_shape()[-1]), int(int(input.get_shape()[-1]) * self.compression)],
+                               initializer=tf.contrib.layers.xavier_initializer())
+        conv = tf.nn.conv2d(normie, kern, strides=[1, 1, 1, 1], padding='SAME')
         drop = tf.nn.dropout(conv, 0.8)
         # A 1x1 conv shouldn't reduce featmap size, but still...
 
         pool = tf.nn.avg_pool(drop, [1, 2, 2, 1], [1, 2, 2, 1], padding='VALID')
         return pool
 
-    def bottleneck(self, input):
+    def bottleneck(self, input, _id):
         """
         Realizes the bottleneck layer to allow (4*growth factor) feature maps through
         Essentially a 1x1 conv with a output featmap size set to (4*growth factor)
         :param input: input to the bottleneck layer
         :return: featuremap with a size reduced to (4*growth factor)
         """
-        kern = tf.Variable(tf.random_normal([1, 1, int(input.shape[-1]), 4*self.growth_factor],
-                                            stddev=np.sqrt(1)))
-        
+        kern = tf.get_variable('bottleneck_%d' % _id,
+                               shape=[1, 1, int(input.shape[-1]), 4*self.growth_factor],
+                               initializer=tf.contrib.layers.xavier_initializer())
         bn = tf.nn.conv2d(input, kern,
                           strides=[1, 1, 1, 1],
                           padding='SAME')
@@ -246,20 +246,21 @@ class DenseNet(Model):
 
         return drop
 
-    def internal_layer(self, input):
+    def internal_layer(self, input, _id):
         """
         Combines bottleneck and composite layers, concatenates their output to the input to grow the feature map
         :param input: the input to append output to
         :return: the extended feature map
         """
-        output = self.bottleneck(input)
-        output = self.composite(output)
-        return tf.concat(values=(input, output), axis=3)
+        output = self.bottleneck(input, _id)
+        output = self.composite(output, _id)
+        return tf.concat(values=(input, output), axis=3)  # check it!!!
 
-    def dense_block(self, input, id):  # Is this even good???
-        output = self.internal_layer(input)
-        for c in range(self.convs - 1):
-            output = self.internal_layer(output)
+    def dense_block(self, input, _id):  # Is this even good???
+        with tf.variable_scope('dense_block_%d' % _id):
+            output = self.internal_layer(input, 0)
+            for c in range(self.convs - 1):
+                output = self.internal_layer(output, c + 1)
         return output
 
     def output(self, input):
@@ -291,7 +292,7 @@ class DenseNet(Model):
 
         for b in range(self.blocks-1):
             network = self.dense_block(network, b)
-            network = self.transition(network)
+            network = self.transition(network, b)
 
         network = self.dense_block(network, self.blocks-1)
         network = self.output(network)
@@ -299,7 +300,7 @@ class DenseNet(Model):
         return network
 
     def train(self, num_epochs=5):
-        decay = 0
+        decay = 0.0001
         l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name]) * decay
         loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels, logits=self.model)) + l2
         optimizer = tf.train.MomentumOptimizer(learning_rate=0.1, momentum=0.9, use_nesterov=True)
