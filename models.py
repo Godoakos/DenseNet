@@ -53,19 +53,20 @@ class Model():
         :return: image data and the corresponding labels
         """
         path = self.train_path if training else self.test_path
-        with open(path+"labels.txt", 'r') as f:
-            lines = [line.strip().split('\t') for line in f.readlines()]
+        ext = '_ext' if os.path.exists(path+"labels_ext.txt") else ''  # checks if extended data set labels exist
+        with open(path+"labels%s.txt" % ext, 'r') as f:
+            lines = [line.strip().split() for line in f.readlines()]
             if random:
                 shuffle(lines)
 
         img_data = []
         lbl_data = []
         for line in lines:
-            img = imageio.imread(path + line[0][:-2])
+            img = imageio.imread(path + line[0])
             img = sp.imresize(img, self.input_size)
             img_data.append(normalize_img(img))
             lbl_data.append([0., 0., 0., 0.])
-            lbl_data[-1][int(line[0][-1])] = 1.
+            lbl_data[-1][int(line[1])] = 1.
             if len(lbl_data) == self.batch_size:
                 yield img_data, lbl_data
                 img_data = []
@@ -249,12 +250,12 @@ class DenseNet(Model):
         :param input: the input to append output to
         :return: the extended feature map
         """
-        # output = self.bottleneck(input)
-        output = self.composite(input)
+        output = self.bottleneck(input)
+        output = self.composite(output)
         return tf.concat(values=(input, output), axis=3)
 
     def dense_block(self, input, id):
-        with tf.variable_scope("block_%d"%id):
+        with tf.variable_scope("block_%d" % id):
             output = self.internal_layer(input)
             for c in range(self.convs - 1):
                 output = self.internal_layer(output)
