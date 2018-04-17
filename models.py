@@ -201,7 +201,8 @@ class DenseNet(Model):
         # kern = tf.truncated_normal([kernel_size, kernel_size, int(relu.shape[-1]), self.growth_factor])
         kern = tf.Variable(tf.random_normal(
             [kernel_size, kernel_size, int(relu.shape[-1]), self.growth_factor],
-            stddev=np.sqrt(1/kernel_size*kernel_size)))
+            stddev=np.sqrt(1/kernel_size*kernel_size)),
+            trainable=True)
         conv = tf.nn.conv2d(relu, kern, strides=[1, 1, 1, 1], padding='SAME')
         selu = tf.nn.selu(conv)
         # Important to preserve feature map size!!!
@@ -220,7 +221,8 @@ class DenseNet(Model):
 
         kernel = tf.Variable(
             tf.random_normal([1, 1, int(normie.get_shape()[-1]), int(int(input.get_shape()[-1]) * self.compression)],
-                             stddev=np.sqrt(1)))
+                             stddev=np.sqrt(1)),
+            trainable=True)
         conv = tf.nn.conv2d(normie, kernel, strides=[1, 1, 1, 1], padding='SAME')
         selu = tf.nn.selu(conv)
         # A 1x1 conv shouldn't reduce featmap size, but still...
