@@ -176,7 +176,6 @@ class DenseNet(Model):
             title = {Densely Connected Convolutional Networks},
             journal = {arXiv preprint arXiv:1608.06993},
             year = {2016}}
-    TODO: Add SELU, L2 Normalization, tweak params, etc
     """
     def __init__(self, batch_size=5,
                  train_path='Training_data/', test_path='Test_data/',
@@ -236,14 +235,18 @@ class DenseNet(Model):
         :param input: input to the bottleneck layer
         :return: featuremap with a size reduced to (4*growth factor)
         """
+        normie = batch_norm(input, scale=True)
+        relu = tf.nn.relu(normie)
+
         kern = tf.get_variable('bottleneck_%d' % _id,
                                shape=[1, 1, int(input.shape[-1]), 4*self.growth_factor],
                                initializer=tf.contrib.layers.xavier_initializer())
-        bn = tf.nn.conv2d(input, kern,
+        bn = tf.nn.conv2d(relu, kern,
                           strides=[1, 1, 1, 1],
                           padding='SAME')
         drop = tf.nn.dropout(bn, 0.8)
 
+        # print('Bottleneck layer id %d, shape:' % _id, drop.shape)
         return drop
 
     def internal_layer(self, input, _id):
@@ -252,15 +255,18 @@ class DenseNet(Model):
         :param input: the input to append output to
         :return: the extended feature map
         """
-        output = self.bottleneck(input, _id)
-        output = self.composite(output, _id)
-        return tf.concat(values=(input, output), axis=3)  # check it!!!
+        bn = self.bottleneck(input, _id)
+        comp = self.composite(bn, _id)
+        output = tf.concat(values=(input, comp), axis=3)
+        # print('internal layer id: %d, shape:' % _id, output.shape)
+        return output
 
     def dense_block(self, input, _id):  # Is this even good???
         with tf.variable_scope('dense_block_%d' % _id):
             output = self.internal_layer(input, 0)
             for c in range(self.convs - 1):
                 output = self.internal_layer(output, c + 1)
+
         return output
 
     def output(self, input):
@@ -316,8 +322,70 @@ class DenseNet(Model):
                     _, batch_loss = sess.run([train_op, loss],
                                     feed_dict={self.images: batch, self.labels: label})
                     l += batch_loss
-                    print("Batch #%d, Loss: %f" % (b, l/b))
+                    print("Batch #%d, Loss: %f" % (b, batch_loss))
                     b += 1.
+                print('Ending epoch #%d, average loss: %f' % (e, (l/b)))
+
+class DenseSelu(DenseNet):
+    """
+    Densenet, but with selu instead of batch norm + relu
+    """
+
+    def __init__(self, batch_size=5,
+                 train_path='Training_data/', test_path='Test_data/',
+                 input_size=[224, 224, 3],
+                 num_blocks=3,
+                 L=6,
+                 k=32,
+                 theta=0.5):
+        super(DenseSelu, self).__init__(batch_size, train_path, test_path, input_size,
+                                        num_blocks, L, k, theta)
+
+    def composite(self, input, _id, kernel_size=3):
+        kern = tf.Variable(tf.truncated_normal([kernel_size, kernel_size, int(input.shape[-1]), self.growth_factor],
+                                            stddev=tf.sqrt(1/kernel_size*kernel_size)),
+                           name='composite_%d' % _id)
+        conv = tf.nn.conv2d(input, kern, strides=[1, 1, 1, 1], padding='SAME')
+        selu = tf.nn.selu(conv)
+        # Important to preserve feature map size!!!
+
+        drop = tf.nn.dropout(selu, 0.8)
+
+        return drop
+
+    def bottleneck(self, input, _id):
+        kern = tf.Variable(tf.truncated_normal([1, 1, int(input.shape[-1]), 4 * self.growth_factor],
+                                            stddev=1),
+                           name='bottleneck_%d' % _id)
+        bn = tf.nn.conv2d(input, kern,
+                          strides=[1, 1, 1, 1],
+                          padding='SAME')
+        selu = tf.nn.selu(bn)
+        drop = tf.nn.dropout(selu, 0.8)
+
+        # print('Bottleneck layer id %d, shape:' % _id, drop.shape)
+        return drop
+
+    def transition(self, input, _id):
+        """
+        Realizes transition layer between dense blocks (batch norm, 1x1 conv, 2x2 avg pool)
+        :param input: output of a dense block
+        :return: reduced size feature map, ready to be fed to another dense block
+        """
+        normie = batch_norm(input, scale=True)
+
+        kern = tf.Variable(tf.truncated_normal([1, 1, int(input.get_shape()[-1]),
+                                             int(int(input.get_shape()[-1]) * self.compression)],
+                                            stddev=1),
+                           name='transition_%d' % _id)
+        conv = tf.nn.conv2d(normie, kern, strides=[1, 1, 1, 1], padding='SAME')
+
+        drop = tf.nn.dropout(conv, 0.8)
+        # A 1x1 conv shouldn't reduce featmap size, but still...
+
+        pool = tf.nn.avg_pool(drop, [1, 2, 2, 1], [1, 2, 2, 1], padding='VALID')
+        return pool
+
 
 if __name__ == '__main__':
     print("Please use this as an import instead of running it directly")
