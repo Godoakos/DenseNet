@@ -36,6 +36,7 @@ class Model():
                                      name='labels')
 
         self.model = self.build_model()
+        self.__sess = None
 
     def build_model(self):
         """
@@ -73,6 +74,15 @@ class Model():
                 yield img_data, lbl_data
                 img_data = []
                 lbl_data = []
+
+    def get_session(self):
+        """
+        Singleton for the TF Session
+        :return: the tensorflow session of the class
+        """
+        if not self.__sess:
+            self.__sess = tf.Session()
+        return self.__sess
 
     def train(self, num_epochs=5):
         """
@@ -168,6 +178,7 @@ class SimpleCNN(Model):
     def test(self):
         return 0.  # Should be a good estimate for this model's performance
 
+
 class DenseNet(Model):
     """
     DenseNet model.
@@ -197,7 +208,7 @@ class DenseNet(Model):
         :param input: the input of the composite function
         :return: output of H_l(input)
         """
-        normie = batch_norm(input, scale=True)
+        normie = batch_norm(input, scale=True, fused=True)
         relu = tf.nn.relu(normie)
 
         kern = tf.get_variable('composite_%d' % _id,
@@ -216,7 +227,7 @@ class DenseNet(Model):
         :param input: output of a dense block
         :return: reduced size feature map, ready to be fed to another dense block
         """
-        normie = batch_norm(input, scale=True)
+        normie = batch_norm(input, scale=True, fused=True)
 
         kern = tf.get_variable('transition_%d' % _id,
                                shape=[1, 1, int(normie.get_shape()[-1]), int(int(input.get_shape()[-1]) * self.compression)],
@@ -235,7 +246,7 @@ class DenseNet(Model):
         :param input: input to the bottleneck layer
         :return: featuremap with a size reduced to (4*growth factor)
         """
-        normie = batch_norm(input, scale=True)
+        normie = batch_norm(input, scale=True, fused=True)
         relu = tf.nn.relu(normie)
 
         kern = tf.get_variable('bottleneck_%d' % _id,
@@ -283,7 +294,7 @@ class DenseNet(Model):
         output = tf.reshape(avgpool, [self.batch_size, avgpool.get_shape()[-1]])
         output = tf.layers.dense(output, units=4)
 
-        return tf.nn.softmax(output)
+        return output
 
     def build_model(self):
         """
@@ -307,24 +318,59 @@ class DenseNet(Model):
 
     def train(self, num_epochs=5):
         decay = 0.0001
-        l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name]) * decay
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels, logits=self.model)) + l2
-        optimizer = tf.train.MomentumOptimizer(learning_rate=0.1, momentum=0.9, use_nesterov=True)
+        l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name])
+        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels, logits=self.model))\
+               + (l2 * decay)
+        optimizer = tf.train.MomentumOptimizer(learning_rate=0.01, momentum=0.9, use_nesterov=True)
         train_op = optimizer.minimize(loss)
 
-        with tf.Session() as sess:
-            sess.run(tf.global_variables_initializer())
-            for e in range(num_epochs):
-                print('Starting epoch #%d' % (e+1))
-                b = 1.
-                l = 0.
-                for batch, label in self.get_data(training=True, random=True):
-                    _, batch_loss = sess.run([train_op, loss],
-                                    feed_dict={self.images: batch, self.labels: label})
-                    l += batch_loss
-                    print("Batch #%d, Loss: %f" % (b, batch_loss))
-                    b += 1.
-                print('Ending epoch #%d, average loss: %f' % (e, (l/b)))
+        test_interval = 5
+
+        tf.summary.scalar('Softmax Cross Entropy Loss', loss)
+        tf.summary.scalar('L2 Loss', l2)
+
+        merged = tf.summary.merge_all()
+        train_writer = tf.summary.FileWriter('train_logs/', self.get_session().graph)
+
+        self.get_session().run(tf.global_variables_initializer())
+        for e in range(num_epochs):
+            print('Starting epoch #%d' % (e+1))
+
+            b = 1.
+            l = 0.
+            for batch, label in self.get_data(training=True, random=True):
+                _, batch_loss, summary = self.get_session().run([train_op, loss, merged],
+                                                                feed_dict={self.images: batch, self.labels: label})
+                train_writer.add_summary(summary)
+                l += batch_loss
+                print("Batch #%d, Loss: %f" % (b, batch_loss))
+                b += 1.
+            print('Ending epoch #%d, average loss: %f' % (e+1, (l/b)))
+
+            if e+1 % test_interval == 0:
+                self.test()
+
+        self.test()
+        self.get_session().close()
+        train_writer.close()
+
+    def test(self):
+        """
+        Check the accuracy of the network
+        :return: the accuracy of the network
+        """
+        accuracy = tf.metrics.accuracy(labels=self.labels, predictions=self.model)
+
+        tb = 0.
+        acc = 0.
+        print('Testing...')
+        for batch, label in self.get_data(training=False, random=False):
+            acc += self.get_session().run(accuracy,
+                                          feed_dict={self.images: batch, self.labels: label})
+            tb += 1
+        print('Accuracy: %f' % (acc / tb))
+        return acc/tb
+
 
 class DenseSelu(DenseNet):
     """
@@ -372,7 +418,7 @@ class DenseSelu(DenseNet):
         :param input: output of a dense block
         :return: reduced size feature map, ready to be fed to another dense block
         """
-        normie = batch_norm(input, scale=True)
+        normie = batch_norm(input, scale=True, fused=True)
 
         kern = tf.Variable(tf.truncated_normal([1, 1, int(input.get_shape()[-1]),
                                              int(int(input.get_shape()[-1]) * self.compression)],
