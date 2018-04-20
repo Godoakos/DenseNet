@@ -317,17 +317,17 @@ class DenseNet(Model):
         return network
 
     def train(self, num_epochs=5):
-        decay = 0.0001
-        l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name])
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels, logits=self.model))\
-               + (l2 * decay)
-        optimizer = tf.train.MomentumOptimizer(learning_rate=0.01, momentum=0.9, use_nesterov=True)
-        train_op = optimizer.minimize(loss)
+        self.decay = 0.0001
+        self.l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name])
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels, logits=self.model)) \
+                    + (self.l2 * self.decay)
+        self.optimizer = tf.train.MomentumOptimizer(learning_rate=0.01, momentum=0.9, use_nesterov=True)
+        train_op = self.optimizer.minimize(self.loss)
 
         test_interval = 5
 
-        tf.summary.scalar('Softmax Cross Entropy Loss', loss)
-        tf.summary.scalar('L2 Loss', l2)
+        tf.summary.scalar('Softmax Cross Entropy Loss', self.loss)
+        tf.summary.scalar('L2 Loss', self.l2)
 
         merged = tf.summary.merge_all()
         train_writer = tf.summary.FileWriter('train_logs/', self.get_session().graph)
@@ -339,7 +339,7 @@ class DenseNet(Model):
             b = 1.
             l = 0.
             for batch, label in self.get_data(training=True, random=True):
-                _, batch_loss, summary = self.get_session().run([train_op, loss, merged],
+                _, batch_loss, summary = self.get_session().run([train_op, self.loss, merged],
                                                                 feed_dict={self.images: batch, self.labels: label})
                 train_writer.add_summary(summary)
                 l += batch_loss
@@ -347,7 +347,7 @@ class DenseNet(Model):
                 b += 1.
             print('Ending epoch #%d, average loss: %f' % (e+1, (l/b)))
 
-            if e+1 % test_interval == 0:
+            if e % test_interval == 0:
                 self.test()
 
         self.test()
@@ -359,16 +359,18 @@ class DenseNet(Model):
         Check the accuracy of the network
         :return: the accuracy of the network
         """
-        accuracy = tf.metrics.accuracy(labels=self.labels, predictions=self.model)
-
         tb = 0.
         acc = 0.
         print('Testing...')
         for batch, label in self.get_data(training=False, random=False):
-            acc += self.get_session().run(accuracy,
+            output = self.get_session().run(tf.nn.softmax(self.model),
                                           feed_dict={self.images: batch, self.labels: label})
-            tb += 1
-        print('Accuracy: %f' % (acc / tb))
+
+            for o, l in zip(output, label):
+                # print(o, l, np.argmax(o), np.argmax(l), (np.argmax(o) == np.argmax(l)))
+                acc += (np.argmax(o) == np.argmax(l))
+            tb += self.batch_size
+        print('Hits: %d, Total:%d, Accuracy: %f' % (acc, tb, acc / tb))
         return acc/tb
 
 
