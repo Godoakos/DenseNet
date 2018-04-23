@@ -2,6 +2,7 @@
 
 import tensorflow as tf
 from tensorflow.contrib.layers import batch_norm
+import os
 from PIL import Image, ImageOps
 from random import shuffle
 
@@ -14,7 +15,7 @@ class Model():
     """
     def __init__(self, batch_size=10,
                  train_path='Training_data/', test_path='Test_data/',
-                 input_size=[224, 224, 3]):
+                 input_size=[512, 384, 3]):
         """
         Sets up initial parameters for the model to use.
         :param batch_size: int, batch size to use during training/testing
@@ -65,7 +66,8 @@ class Model():
         lbl_data = []
         for line in lines:
             img = np.array(Image.open(path + line[0]))
-            # img = sp.imresize(img, self.input_size)
+            if img.shape != self.input_size:
+                img = sp.imresize(img, self.input_size)
             # img_data.append(normalize_img(img))
             img_data.append(img)
             lbl_data.append([0., 0., 0., 0.])
