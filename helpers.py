@@ -1,6 +1,10 @@
+# -*- encoding: utf-8 -*-
+
 import os
 import numpy as np
 from PIL import Image, ImageOps
+import matplotlib.pyplot as plt
+import scipy.misc as sp
 
 def create_manifest_train(train_path='Training_data/'):
     """
@@ -40,13 +44,6 @@ def create_manifest_test(test_path='Test_data/'):
             stripped = line.strip().rsplit("\t")
             f.write(stripped[0] + '.tif %d\n' % (classes.index(stripped[1])))
 
-def normalize_img(img):
-    mean = np.mean(img)
-    img = np.subtract(img, mean)
-    var = np.var(img)
-    img /= var
-    return img
-
 
 def augment(path):
     with open(path + '/labels.txt', 'r') as f:
@@ -62,6 +59,7 @@ def augment(path):
         for i in range(len(ops)):
             ops[i].save('%s/%s_%d.tif' % (path, line[0][:-4], i+1))
 
+
 def extend_manifest(path):
     with open(path + '/labels.txt', 'r') as f:
         lines = [line.strip().split() for line in f.readlines()]
@@ -75,7 +73,46 @@ def extend_manifest(path):
             f.write('%s %s\n' % (line[0], line[1]))
 
 
+def circle_cut(img, n=10, dims=[224, 224]):
+    """
+    Cuts n sub-images from img with a size of dims in spiral pattern originating from the middle of img
+    :param img: image to cut
+    :param n: number of cuts to make
+    :param dims: size of the cut images
+    :return: the n slices of img
+    """
+    center = [int(i/2) for i in img.shape][:2]
+    r = int(dims[0]/2)
+    step = 360 / n
+    for t in range(n):
+        offset = np.random.randint(-int(dims[0] / 3), int(dims[0] / 3))
+        x = int(center[0] + r * np.cos(step * t)) + offset
+        y = int(center[1] + r * np.sin(step * t)) + offset
+        yield img[int(x-dims[0]/2):int(x+dims[0]/2), int(y-dims[1]/2):int(y+dims[1]/2), :]
+
+
+def augment_cut(path, n=10, dims=[384, 512]):
+    manifest = 'labels_ext.txt' if os.path.exists(path+"labels_ext.txt") else 'labels.txt'
+    with open(path + manifest, 'r') as f:
+        lines = [line.strip().split() for line in f.readlines()]
+    aug = list()
+    for line in lines:
+        sample = np.array(Image.open(path + line[0]))
+        idx = 0
+        for slice in circle_cut(sample, n, dims):
+            fn = '%s_%d.tif' % (line[0][:-4], idx)
+            try:
+                sp.imsave('%s_aug/%s' % (path[:-1], fn), slice)
+            except FileNotFoundError:
+                os.makedirs('%s_aug/%s/' % (path[:-1], fn.strip().split('/')[0]))
+                sp.imsave('%s_aug/%s' % (path[:-1], fn), slice)
+            aug.append('%s %s' % (fn, line[1]))
+            idx += 1
+    with open('%s_aug/%s' % (path[:-1], manifest), 'w') as f:
+        for line in aug:
+            f.write(line + '\n')
+
+
 if __name__ == "__main__":
     print("This is a collection of helper functions you can call if you import this file.")
-    augment('Training_data')
-    extend_manifest('Training_data')
+    augment_cut('Test_data/')

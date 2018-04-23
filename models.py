@@ -6,7 +6,7 @@ import imageio
 import scipy.misc as sp
 from random import shuffle
 
-from helpers import *
+from preproc import *
 
 
 class Model():
