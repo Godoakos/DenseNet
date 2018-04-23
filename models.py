@@ -65,9 +65,10 @@ class Model():
         img_data = []
         lbl_data = []
         for line in lines:
-            img = np.array(Image.open(path + line[0]))
+            img = np.array(Image.open(path + line[0]).resize((self.input_size[0], self.input_size[1]),
+                                                             resample=Image.LANCZOS))
             if img.shape != self.input_size:
-                img = sp.imresize(img, self.input_size)
+                img = np.resize(img, self.input_size)
             # img_data.append(normalize_img(img))
             img_data.append(img)
             lbl_data.append([0., 0., 0., 0.])
@@ -174,7 +175,7 @@ class SimpleCNN(Model):
                     _, batch_loss = sess.run([train_op, loss],
                                     feed_dict={self.images: batch, self.labels: label})
                     l += batch_loss
-                    print("Batch #%d, Loss: %f" % (b, l/b))
+                    print("Epoch #%d, Batch #%d, Loss: %f" % (e+1, b, l/b))
                     b += 1.
 
     def test(self):
@@ -192,10 +193,10 @@ class DenseNet(Model):
     """
     def __init__(self, batch_size=5,
                  train_path='Training_data_aug/', test_path='Test_data_aug/',
-                 input_size=[224, 224, 3],
+                 input_size=[512, 384, 3],
                  num_blocks=3,
-                 L=6,
-                 k=32,
+                 L=30,
+                 k=12,
                  theta=0.5):
         self.growth_factor = k
         self.compression = theta
@@ -323,7 +324,7 @@ class DenseNet(Model):
         self.l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'bias' not in v.name])
         self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.labels, logits=self.model)) \
                     + (self.l2 * self.decay)
-        self.optimizer = tf.train.MomentumOptimizer(learning_rate=0.01, momentum=0.9, use_nesterov=True)
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=0.01)
         train_op = self.optimizer.minimize(self.loss)
 
         test_interval = 5
@@ -345,7 +346,7 @@ class DenseNet(Model):
                                                                 feed_dict={self.images: batch, self.labels: label})
                 train_writer.add_summary(summary)
                 l += batch_loss
-                print("Batch #%d, Loss: %f" % (b, batch_loss))
+                print("Epoch #%d, Batch #%d, Loss: %f" % (e+1, b, batch_loss))
                 b += 1.
             print('Ending epoch #%d, average loss: %f' % (e+1, (l/b)))
 

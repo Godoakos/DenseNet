@@ -116,3 +116,7 @@ def augment_cut(path, n=10, dims=[384, 512]):
 if __name__ == "__main__":
     print("This is a collection of helper functions you can call if you import this file.")
     augment_cut('Test_data/')
+
+# TODO: DO NOT CUT TEST IMAGES RANDOMLY, USE A GRID AND DECISION SCHEME OR IDK
+# TODO: TEST TRAIN ACCURACY
+# TODO: CHECK IF RESIZING IMAGE DOESNT SCREW WITH ASPECT RATION IN MODELS.PY
