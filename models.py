@@ -2,8 +2,7 @@
 
 import tensorflow as tf
 from tensorflow.contrib.layers import batch_norm
-import imageio
-import scipy.misc as sp
+from PIL import Image, ImageOps
 from random import shuffle
 
 from preproc import *
@@ -65,9 +64,10 @@ class Model():
         img_data = []
         lbl_data = []
         for line in lines:
-            img = imageio.imread(path + line[0])
-            img = sp.imresize(img, self.input_size)
-            img_data.append(normalize_img(img))
+            img = np.array(Image.open(path + line[0]))
+            # img = sp.imresize(img, self.input_size)
+            # img_data.append(normalize_img(img))
+            img_data.append(img)
             lbl_data.append([0., 0., 0., 0.])
             lbl_data[-1][int(line[1])] = 1.
             if len(lbl_data) == self.batch_size:
@@ -189,7 +189,7 @@ class DenseNet(Model):
             year = {2016}}
     """
     def __init__(self, batch_size=5,
-                 train_path='Training_data/', test_path='Test_data/',
+                 train_path='Training_data_aug/', test_path='Test_data_aug/',
                  input_size=[224, 224, 3],
                  num_blocks=3,
                  L=6,
